@@ -2,11 +2,12 @@
 ## DEVELOPMENT ENVIRONMENT 
 uv is used for this project. Check out PR: https://github.com/Hog185/Rufus-Py/pull/37
 ## Conventions:
-Proper PR  or Issue link must be provided where relevant.
-Errors and Exceptions which halt the usage of the whole program are added to the immediate attention group only.
-Other bugs are added to the Immediate attention or further attention group according to priority only.
-Suggestions are added to the further attention or Down the line group accordingly.
-These are listed with a priority order from higher priority to lower priority. Editors are requested to strictly follow this priority order to maximize efficiency
+- Proper PR  or Issue link must be provided where relevant.
+- Errors and Exceptions which halt the usage of the whole program are added to the immediate attention group only.
+- Other bugs are added to the Immediate attention or further attention group according to priority only.
+- Suggestions are added to the further attention or Down the line group accordingly.
+- These are listed with a priority order from higher priority to lower priority.
+-  Editors are requested to strictly follow this priority order to maximize efficiency
 ## To-Do
 ### Immediate Attention:
 - Fix cluster function command and error handling to avoid crash when executed [backend]
@@ -22,9 +23,9 @@ These are listed with a priority order from higher priority to lower priority. E
 - Ensure all gui components are connected to their respective functions [frontend + backend]
 - Ensure all the data is on the disk before telling the user that the writing is done, if not we must find a way to counter this? [backend]
 - Make the cancel button actually work: (no clue how to properly implement yet?) [backend + frontend]
-When cancel button is clicked we must stop the ongoing process
-We must restore the initial data, label and other stuff or not?
-We may possibly remove this feature all together and just warn the user in BIG RED TEXT saying that the changes are irreversible XD (makes the most sense to me)
+- When cancel button is clicked we must stop the ongoing process
+- We must restore the initial data, label and other stuff or not?
+- We may possibly remove this feature all together and just warn the user in BIG RED TEXT saying that the changes are irreversible XD (makes the most sense to me)
 - Hopefully make the progress bar actually increment like it should. [frontend]
 
 ---
