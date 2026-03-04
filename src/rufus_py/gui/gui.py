@@ -258,7 +258,6 @@ class Rufus(QMainWindow):
         self.combo_image_option = QComboBox()
         self.combo_image_option.addItem("Standard Windows installation")
         self.combo_image_option.addItem("Windows To Go")
-        self.combo_image_option.addItem("Windows To Go")
         self.combo_image_option.addItem("Standard Linux")
         self.combo_image_option.currentTextChanged.connect(self.update_image_option)
 
@@ -504,6 +503,8 @@ class Rufus(QMainWindow):
 
     def show_about(self):
         self.about_window = AboutWindow()
+        about_content = "filler text, change this later"
+        self.about_window.about_text.setPlainText(about_content)
         self.about_window.show()
 
     def log_message(self, msg):
@@ -512,7 +513,7 @@ class Rufus(QMainWindow):
 
     def about_message(self, msg):
         if hasattr(self, 'about_window'):
-            self.log_window.about_text.append(f"Rufus-Py is a disk image writer written in py for linux")
+            self.about_window.about_text.append(f"Rufus-Py is a disk image writer written in py for linux")
 
     def ready(self):
         self.btn_start.setEnabled(True)
