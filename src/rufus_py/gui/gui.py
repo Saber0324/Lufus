@@ -14,7 +14,8 @@ from PyQt6.QtGui import QFont
 from rufus_py.drives import states
 from rufus_py.drives import formatting as fo
 from rufus_py.writing.flash_usb import FlashUSB
-from rufus_py.drives.autodetect_usb import UsbMonitor
+from rufus_py.drives.find_usb import find_usb
+
 
 class LogWindow(QDialog):
     def __init__(self):
@@ -29,6 +30,7 @@ class LogWindow(QDialog):
         layout.addWidget(self.log_text)
         self.setLayout(layout)
 
+
 class AboutWindow(QDialog):
     def __init__(self):
         super().__init__()
@@ -42,32 +44,35 @@ class AboutWindow(QDialog):
         layout.addWidget(self.about_text)
         self.setLayout(layout)
 
-class FlashWorker(QThread): # this is so the ui dont freeze when flashing
+
+class FlashWorker(QThread):
+    """Worker thread for flashing ISO to USB without freezing UI"""
     finished = pyqtSignal(bool)
     progress = pyqtSignal(str)
+    
     def __init__(self, iso_path: str, mount_path: str):
         super().__init__()
         self.iso_path = iso_path
         self.mount_path = mount_path
+    
     def run(self):
         try:
             self.progress.emit("Unmounting drive...")
             fo.unmount()
-            #update progress bar
+            
             self.progress.emit("Flashing ISO to device...")
             result = FlashUSB(self.iso_path, self.mount_path)
-            #see above
+            
             if result:
                 self.progress.emit("Flashing complete!")
             else:
                 self.progress.emit("Flash failed.")
-            #see above
+            
             self.finished.emit(result)
-            #yay it worked
         except Exception as e:
             self.progress.emit(f"Error: {str(e)}")
             self.finished.emit(False)
-            #change progress bar 2: electric boogaloo
+
 
 class Rufus(QMainWindow):
     def __init__(self, usb_devices=None):
@@ -79,8 +84,16 @@ class Rufus(QMainWindow):
         
         self.usb_devices = usb_devices or {}
         self.setWindowTitle("Rufus")
-        self.setFixedSize(640, 700) 
+        self.setFixedSize(640, 700)
+        self.flash_worker = None
+        self.log_window = None
+        self.about_window = None
         
+        self._apply_styles()
+        self.init_ui()
+
+    def _apply_styles(self):
+        """Apply stylesheet to the main window"""
         self.setStyleSheet("""
             QMainWindow {
                 background-color: #F0F0F0;
@@ -92,7 +105,6 @@ class Rufus(QMainWindow):
                 color: #000000;
                 padding: 2px;
             }
-            /* Section Headers */
             QLabel#sectionHeader {
                 font-size: 16pt;
                 font-weight: normal;
@@ -179,7 +191,6 @@ class Rufus(QMainWindow):
             QProgressBar::chunk {
                 background-color: #00CC00;
             }
-            /* Icon Only Buttons */
             QToolButton {
                 border: 1px solid #D0D0D0;
                 background-color: white;
@@ -215,9 +226,8 @@ class Rufus(QMainWindow):
             }
         """)
 
-        self.init_ui()
-
     def create_header(self, text):
+        """Create a section header with a horizontal line"""
         layout = QHBoxLayout()
         layout.setContentsMargins(0, 10, 0, 5)
         label = QLabel(text)
@@ -226,7 +236,6 @@ class Rufus(QMainWindow):
         line.setFrameShape(QFrame.Shape.HLine)
         line.setFrameShadow(QFrame.Shadow.Sunken)
         line.setStyleSheet("background-color: #000000; min-height: 1px; max-height: 1px;")
-        
         layout.addWidget(label)
         layout.addWidget(line, 1)
         return layout
@@ -244,10 +253,33 @@ class Rufus(QMainWindow):
     def on_usb_added(self, node):
         QMessageBox.information(self, "USB Inserted", f"{node} connected")
 
-    def on_usb_removed(self, node):
-        QMessageBox.warning(self, "USB Removed", f"{node} disconnected")
-    
+    def create_refresh_button(self):
+        btn = QToolButton()
+        btn.setText("🔄")
+        btn.setToolTip("Refresh USB devices (Ctrl+R)")
+        btn.setStyleSheet("""
+            QToolButton {
+                border: 1px solid #D0D0D0;
+                background-color: white;
+                font-size: 15px;
+                max-height: 25px;
+                min-height: 25px;
+                max-width: 25px;
+                min-width: 25px;
+            }
+            QToolButton:hover {
+                background-color: #E5F1FB;
+                border-color: #0078D7;
+            }
+            QToolButton:pressed {
+                background-color: #D0D0D0;
+            }
+        """)
+        btn.clicked.connect(self.refresh_usb_devices)
+        return btn
+
     def init_ui(self):
+        """Initialize the user interface"""
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout()
@@ -260,20 +292,22 @@ class Rufus(QMainWindow):
         lbl_device.setStyleSheet("font-weight: normal; font-size: 9pt; padding-bottom: 2px;")
         self.combo_device = QComboBox()
         
-        # Populate combo box with detected USB devices
-        # if self.usb_devices:
-            
-        #     for path, label in self.usb_devices.items():
-        #         self.combo_device.addItem(f"{label} ({path})")
-        # else:
-        #     self.combo_device.addItem("No USB devices found")
+        self._populate_device_combo()
+        
+        btn_refresh = self.create_refresh_button()
+        
+        device_row = QHBoxLayout()
+        device_row.setSpacing(5)
+        device_row.addWidget(self.combo_device, 1)
+        device_row.addWidget(btn_refresh)
         
         device_layout = QVBoxLayout()
         device_layout.setSpacing(2)
         device_layout.addWidget(lbl_device)
-        device_layout.addWidget(self.combo_device)
+        device_layout.addLayout(device_row)
         main_layout.addLayout(device_layout)
 
+        # Boot selection
         lbl_boot = QLabel("Boot selection")
         lbl_boot.setStyleSheet("font-weight: normal; font-size: 9pt; padding-bottom: 2px;")
         
@@ -290,7 +324,6 @@ class Rufus(QMainWindow):
         
         btn_select = QPushButton("SELECT")
         btn_select.clicked.connect(self.browse_file)
-
         
         boot_row.addWidget(self.combo_boot, 1)
         boot_row.addWidget(lbl_check)
@@ -302,6 +335,7 @@ class Rufus(QMainWindow):
         boot_layout.addLayout(boot_row)
         main_layout.addLayout(boot_layout)
 
+        # Image option
         lbl_image = QLabel("Image option")
         lbl_image.setStyleSheet("font-weight: normal; font-size: 9pt; padding-bottom: 2px;")
         self.combo_image_option = QComboBox()
@@ -316,6 +350,7 @@ class Rufus(QMainWindow):
         image_layout.addWidget(self.combo_image_option)
         main_layout.addLayout(image_layout)
 
+        # Partition scheme and target system
         grid_part = QGridLayout()
         grid_part.setSpacing(10)
         grid_part.setColumnStretch(1, 1)
@@ -339,13 +374,14 @@ class Rufus(QMainWindow):
         grid_part.addWidget(self.combo_partition, 1, 0)
         grid_part.addWidget(lbl_target, 0, 2)
         grid_part.addWidget(self.combo_target, 1, 2)
-        
         main_layout.addLayout(grid_part)
         
         main_layout.addSpacing(15)
 
+        # === FORMAT OPTIONS ===
         main_layout.addLayout(self.create_header("Format Options"))
 
+        # Volume label
         lbl_vol = QLabel("Volume label")
         lbl_vol.setStyleSheet("font-weight: normal; font-size: 9pt; padding-bottom: 2px;")
         self.input_label = QLineEdit("Volume label")
@@ -357,6 +393,7 @@ class Rufus(QMainWindow):
         vol_layout.addWidget(self.input_label)
         main_layout.addLayout(vol_layout)
 
+        # File system and cluster size
         grid_fmt = QGridLayout()
         grid_fmt.setSpacing(10)
         grid_fmt.setColumnStretch(1, 1)
@@ -375,13 +412,14 @@ class Rufus(QMainWindow):
         self.combo_cluster.addItem("4096 bytes (Default)")
         self.combo_cluster.addItem("8192 bytes")
         self.combo_cluster.currentTextChanged.connect(self.update_cluster_size)
+        
         grid_fmt.addWidget(lbl_fs, 0, 0)
         grid_fmt.addWidget(self.combo_fs, 1, 0)
         grid_fmt.addWidget(lbl_cluster, 0, 2)
         grid_fmt.addWidget(self.combo_cluster, 1, 2)
-        
         main_layout.addLayout(grid_fmt)
 
+        # Checkboxes
         self.chk_quick = QCheckBox("Quick format")
         self.chk_quick.setChecked(True)
         self.chk_quick.stateChanged.connect(self.update_QF)
@@ -407,11 +445,11 @@ class Rufus(QMainWindow):
         chk_layout.addWidget(self.chk_quick)
         chk_layout.addWidget(self.chk_extended)
         chk_layout.addLayout(bad_blocks_row)
-        
         main_layout.addLayout(chk_layout)
         
         main_layout.addSpacing(15)
 
+        # === STATUS ===
         main_layout.addLayout(self.create_header("Status"))
 
         self.progress_bar = QProgressBar()
@@ -419,10 +457,12 @@ class Rufus(QMainWindow):
         self.progress_bar.setFormat("")
         main_layout.addWidget(self.progress_bar)
 
+        # Bottom controls
         bottom_controls = QHBoxLayout()
         bottom_controls.setSpacing(10)
         bottom_controls.setContentsMargins(0, 10, 0, 0)
         
+        # Icon buttons
         icons_layout = QHBoxLayout()
         icons_layout.setSpacing(5)
         
@@ -430,7 +470,6 @@ class Rufus(QMainWindow):
         btn_icon1.setText("🌐")
         btn_icon1.setToolTip("Download updates")
         btn_icon1.clicked.connect(lambda: webbrowser.open('http://www.github.com/hog185/rufus-py'))
-
         
         btn_icon2 = QToolButton()
         btn_icon2.setText("ℹ")
@@ -452,6 +491,7 @@ class Rufus(QMainWindow):
         icons_layout.addWidget(btn_icon4)
         icons_layout.addStretch()
         
+        # Start/Cancel buttons
         self.btn_start = QPushButton("START")
         self.btn_start.setObjectName("btnStart")
         self.btn_start.setFixedSize(100, 50)
@@ -468,46 +508,72 @@ class Rufus(QMainWindow):
         
         bottom_controls.addLayout(icons_layout, 1)
         bottom_controls.addLayout(btn_layout)
-        
         main_layout.addLayout(bottom_controls)
         
         main_layout.addStretch()
-
         central_widget.setLayout(main_layout)
         
+        # Status bar
         self.statusBar = QStatusBar()
         self.setStatusBar(self.statusBar)
-        self.statusBar.showMessage("", 0)
+        self.statusBar.showMessage("Ready", 0)
 
+    def _populate_device_combo(self):
+        """Populate the device combo box with USB devices"""
+        self.combo_device.blockSignals(True)
+        self.combo_device.clear()
+        
+        if self.usb_devices:
+            for path, label in self.usb_devices.items():
+                self.combo_device.addItem(f"{label} ({path})")
+        else:
+            self.combo_device.addItem("No USB devices found")
+        
+        self.combo_device.blockSignals(False)
 
+    def refresh_usb_devices(self):
+        self.statusBar.showMessage("Scanning for USB devices...", 2000)
+        try:
+            new_devices = find_usb()
+            
+            if new_devices:
+                self.usb_devices = new_devices
+                self._populate_device_combo()
+                self.log_message(f"USB scan complete: {len(new_devices)} device(s) found")
+                QMessageBox.information(self, "New USB Device Found","USB Device Found")            
+            else:
+                self.usb_devices = {}
+                self._populate_device_combo()
+                self.log_message("No USB devices found during scan")
+                QMessageBox.information(self, "No Devices", 
+                    "No USB drives were found.\n\nPlease connect a drive and try again.")
+        except Exception as e:
+            self.statusBar.showMessage("Scan failed", 3000)
+            self.log_message(f"USB scan error: {str(e)}")
+            QMessageBox.critical(self, "Scan Error", f"Failed to scan for USB devices:\n{str(e)}")
 
     def updateFS(self):
         states.currentFS = self.combo_fs.currentIndex()
-        # print(f"Global state updated to: {states.currentFS}")
     
     def update_image_option(self):
-        states.image_option = self.combo_image_option.currentIndex()
-        # print(f"Global state updated to: {states.image_option}")
+        states.image_option = self.combo_image_option.currentText()
         self._update_filesystem_options()
+        # print(f"Global state updated to: {states.image_option}")
     
     def _update_filesystem_options(self):
-        states.image_option = self.combo_image_option.currentText()
         self.combo_fs.blockSignals(True)
         if states.image_option == "Standard Linux":
             self.combo_fs.clear()
             self.combo_fs.addItem("UDF")
-            # print("UDF Only")
         else:
             self.combo_fs.clear()
             self.combo_fs.addItems(self.all_fs_options)
             self.combo_fs.setCurrentText("NTFS")
-            # print("windows options")
         self.combo_fs.blockSignals(False)
         self.updateFS()
 
     def update_partition_scheme(self):
         states.partition_scheme = self.combo_partition.currentIndex()
-        # print(f"Global state updated to: {states.partition_scheme}")
 
     def update_target_system(self):
         states.target_system = self.combo_target.currentIndex()
@@ -515,72 +581,54 @@ class Rufus(QMainWindow):
     
     def update_new_label(self, current_text):
         states.new_label = current_text
-        # print(f"Stored in state: {states.new_label}")
     
     def update_cluster_size(self):
         states.cluster_size = self.combo_cluster.currentIndex()
-        print(f"Global state updated to: {states.cluster_size}")
+        # print(f"Global state updated to: {states.cluster_size}")
 
     def update_QF(self):
-        if self.chk_quick.isChecked():
-            states.QF = 0
-            # print(states.QF)
-        else:
-            states.QF = 1
-            # print(states.QF)
+        states.QF = 0 if self.chk_quick.isChecked() else 1
 
     def update_create_extended(self):
-        if self.chk_extended.isChecked():
-            states.create_extended = 0
-            # print(states.create_extended)
-        else:
-            states.create_extended = 1
-            # print(states.create_extended)
+        states.create_extended = 0 if self.chk_extended.isChecked() else 1
 
     def update_check_bad(self):
-        if self.chk_badblocks.isChecked():
-            states.check_bad = 0
-            # print(states.check_bad)
-        else:
-            states.check_bad = 1
-            # print(states.check_bad)
+        states.check_bad = 0 if self.chk_badblocks.isChecked() else 1
+        self.combo_badblocks.setEnabled(self.chk_badblocks.isChecked())
 
     def browse_file(self):
-        file_name, _ = QFileDialog.getOpenFileName(self, "Select Disk Image", "", "ISO Images (*.iso);;All Files (*)")
+        file_name, _ = QFileDialog.getOpenFileName(self, "Select Disk Image", "", 
+                                                    "ISO Images (*.iso);;All Files (*)")
         if file_name:
-            states.iso_path=file_name
-
+            states.iso_path = file_name
             clean_name = file_name.split("/")[-1].split("\\")[-1]
             self.combo_boot.setItemText(0, clean_name)
             self.input_label.setText(clean_name.split('.')[0].upper())
-
             self.log_message(f"Selected image: {file_name}")
-            # print(f"iso path:{states.iso_path}")
 
     def show_log(self):
-        self.log_window = LogWindow()
+        if self.log_window is None:
+            self.log_window = LogWindow()
         self.log_window.show()
+        self.log_window.raise_()
+        self.log_window.activateWindow()
 
     def show_about(self):
-        self.about_window = AboutWindow()
-        about_content = "filler text, change this later"
-        self.about_window.about_text.setPlainText(about_content)
+        if self.about_window is None:
+            self.about_window = AboutWindow()
+            about_content = "Rufus-Py is a disk image writer written in Python for Linux.\n\n"
+            about_content += "Inspired by the original Rufus tool for Windows.\n\n"
+            about_content += "Version: 1.0.0\n"
+            about_content += "GitHub: github.com/hog185/rufus-py"
+            self.about_window.about_text.setPlainText(about_content)
         self.about_window.show()
+        self.about_window.raise_()
+        self.about_window.activateWindow()
 
     def log_message(self, msg):
-        if hasattr(self, 'log_window'):
+        if self.log_window and self.log_window.isVisible():
             self.log_window.log_text.append(f"[INFO] {msg}")
 
-    def about_message(self, msg):
-        if hasattr(self, 'about_window'):
-            self.about_window.about_text.append(f"Rufus-Py is a disk image writer written in py for linux")
-
-    def ready(self):
-        self.btn_start.setEnabled(True)
-        self.btn_cancel.setEnabled(False)
-        self.progress_bar.setValue(100)
-        self.progress_bar.setFormat("READY FOR ACTION")
-    
     def get_selected_mount_path(self) -> str:
         text = self.combo_device.currentText()
         if '(' in text and ')' in text:
@@ -588,35 +636,39 @@ class Rufus(QMainWindow):
         return ""
     
     def cancel_process(self):
-        reply = QMessageBox.question(self, "Cancel", "Are you sure you want to cancel?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        reply = QMessageBox.question(self, "Cancel", 
+            "Are you sure you want to cancel?", 
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if reply == QMessageBox.StandardButton.Yes:
-            if hasattr(self, 'flash_worker') and self.flash_worker.isRunning():
+            if self.flash_worker and self.flash_worker.isRunning():
                 self.flash_worker.terminate()
             self.progress_bar.setValue(0)
             self.progress_bar.setFormat("")
             self.btn_start.setEnabled(True)
             self.btn_cancel.setEnabled(False)
             self.statusBar.showMessage("Ready", 0)
+            self.log_message("Flash process cancelled by user")
     
     def on_flash_finished(self, success: bool):
-        #yayyyyyy
         if success:
             self.progress_bar.setValue(100)
             self.progress_bar.setFormat("Complete! 100%")
             QMessageBox.information(self, "Success", "USB drive flashed successfully!")
+            self.log_message("Flash completed successfully")
         else:
             self.progress_bar.setFormat("Failed")
-            QMessageBox.critical(self, "Error", "Failed to flash USB drive.") #uh oh
+            QMessageBox.critical(self, "Error", "Failed to flash USB drive.")
+            self.log_message("Flash failed")
+        
         self.btn_start.setEnabled(True)
         self.btn_cancel.setEnabled(False)
         self.statusBar.showMessage("Ready", 0)
-
     
     def start_process(self):
-        #error handling woah so cool im such a good programmer, this will surely never fail
         if not getattr(states, 'iso_path', '') or not Path(states.iso_path).exists():
             QMessageBox.warning(self, "No Image", "Please select a valid installation file first.")
             return
+        
         mount_path = self.get_selected_mount_path()
         if not mount_path:
             QMessageBox.warning(self, "No Device", "Please select a USB device first.")
@@ -627,22 +679,30 @@ class Rufus(QMainWindow):
         self.progress_bar.setValue(0)
         self.progress_bar.setFormat("Preparing...")
         self.statusBar.showMessage("Flashing...", 0)
-        #progress bar:3c
+        
         self.flash_worker = FlashWorker(states.iso_path, mount_path)
         self.flash_worker.progress.connect(lambda msg: self.statusBar.showMessage(msg, 0))
-        # self.flash_worker.finished.connect(self.on_flash_finished)
+        self.flash_worker.finished.connect(self.on_flash_finished)
         self.flash_worker.start()
         
+        self.log_message(f"Starting flash process: {states.iso_path} -> {mount_path}")
+
+    def keyPressEvent(self, event):
+        """Handle keyboard shortcuts"""
+        if event.key() == Qt.Key.Key_R and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+            self.refresh_usb_devices()
+        elif event.key() == Qt.Key.Key_F5:
+            self.refresh_usb_devices()
+        super().keyPressEvent(event)
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     app.setStyle("Fusion") 
     
-    # Parse USB devices from command line argument
     usb_devices = {}
     if len(sys.argv) > 1:
         try:
-            # Decode the URL-encoded JSON data
             decoded_data = urllib.parse.unquote(sys.argv[1])
             usb_devices = json.loads(decoded_data)
             print("Successfully parsed USB devices:", usb_devices)
