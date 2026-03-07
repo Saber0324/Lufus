@@ -12,17 +12,17 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
 from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, QPoint, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QFont
 
-from rufus_py.drives import states
-from rufus_py.drives import formatting as fo
-from rufus_py.writing.flash_usb import FlashUSB
-from rufus_py.drives.find_usb import find_usb
-from rufus_py.drives.autodetect_usb import UsbMonitor
+from lufus_py.drives import states
+from lufus_py.drives import formatting as fo
+from lufus_py.writing.flash_usb import FlashUSB
+from lufus_py.drives.find_usb import find_usb
+from lufus_py.drives.autodetect_usb import UsbMonitor
 
 
 class LogWindow(QDialog):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Rufus Log")
+        self.setWindowTitle("lufus Log")
         self.resize(650, 450)
         layout = QVBoxLayout()
         self.log_text = QTextEdit()
@@ -130,6 +130,7 @@ class FlashWorker(QThread):
     """Worker thread for flashing ISO to USB without freezing UI"""
     finished = pyqtSignal(bool)
     progress = pyqtSignal(str)
+    progress_value = pyqtSignal(int)
     
     def __init__(self, iso_path: str, device_node: str):
         super().__init__()
@@ -139,11 +140,13 @@ class FlashWorker(QThread):
     def run(self):
         try:
             self.progress.emit("Unmounting drive...")
+            self.progress_value.emit(2)
             for partition in glob(f"{self.device_node}*"):
                 fo.unmount(partition)
             
             self.progress.emit("Flashing ISO to device...")
-            result = FlashUSB(self.iso_path, self.device_node)
+            self.progress_value.emit(5)
+            result = FlashUSB(self.iso_path, self.device_node, progress_cb=self.progress_value.emit)
             
             if result:
                 self.progress.emit("Flashing complete!")
@@ -156,7 +159,7 @@ class FlashWorker(QThread):
             self.finished.emit(False)
 
 
-class Rufus(QMainWindow):
+class lufus(QMainWindow):
     def __init__(self, usb_devices=None):
         super().__init__()
         self.monitor = UsbMonitor()
@@ -164,7 +167,7 @@ class Rufus(QMainWindow):
         self.monitor.device_list_updated.connect(self.update_usb_list)
         
         self.usb_devices = usb_devices or {}
-        self.setWindowTitle("Rufus")
+        self.setWindowTitle("lufus")
         self.setFixedSize(640, 690)
         self.flash_worker = None
         self.log_window = None
@@ -568,7 +571,7 @@ class Rufus(QMainWindow):
         btn_icon1 = QToolButton()
         btn_icon1.setText("🌐")
         btn_icon1.setToolTip("Download updates")
-        btn_icon1.clicked.connect(lambda: webbrowser.open('http://www.github.com/hog185/rufus-py'))
+        btn_icon1.clicked.connect(lambda: webbrowser.open('http://www.github.com/hog185/lufus'))
         
         btn_icon2 = QToolButton()
         btn_icon2.setText("ℹ")
@@ -741,10 +744,10 @@ class Rufus(QMainWindow):
     def show_about(self):
         if self.about_window is None:
             self.about_window = AboutWindow()
-            about_content = "Rufus-Py is a disk image writer written in Python for Linux.\n\n"
-            about_content += "Inspired by the original Rufus tool for Windows.\n\n"
+            about_content = "lufus is a disk image writer written in Python for Linux.\n\n"
+            about_content += "Inspired by the original lufus tool for Windows.\n\n"
             about_content += "Version: 1.0.0\n"
-            about_content += "GitHub: github.com/hog185/rufus-py"
+            about_content += "GitHub: github.com/hog185/lufus"
             self.about_window.about_text.setPlainText(about_content)
         self.about_window.show()
         self.about_window.raise_()
@@ -809,6 +812,8 @@ class Rufus(QMainWindow):
 
                 self.flash_worker = FlashWorker(states.iso_path, mount_path)
                 self.flash_worker.progress.connect(lambda msg: self.statusBar.showMessage(msg, 0))
+                self.flash_worker.progress_value.connect(self.progress_bar.setValue)
+                self.flash_worker.progress_value.connect(lambda v: self.progress_bar.setFormat(f"{v}%"))
                 self.flash_worker.finished.connect(self.on_flash_finished)
                 self.flash_worker.start()
 
@@ -833,6 +838,8 @@ class Rufus(QMainWindow):
                 
                 self.flash_worker = FlashWorker(states.iso_path, device_node)
                 self.flash_worker.progress.connect(lambda msg: self.statusBar.showMessage(msg, 0))
+                self.flash_worker.progress_value.connect(self.progress_bar.setValue)
+                self.flash_worker.progress_value.connect(lambda v: self.progress_bar.setFormat(f"{v}%"))
                 self.flash_worker.finished.connect(self.on_flash_finished)
                 self.flash_worker.start()
                 
@@ -904,6 +911,6 @@ if __name__ == "__main__":
     else:
         print("No USB devices data received")
     
-    window = Rufus(usb_devices)
+    window = lufus(usb_devices)
     window.show()
     sys.exit(app.exec())

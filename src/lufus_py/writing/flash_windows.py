@@ -40,9 +40,14 @@ def _split_wim(data_mount):
     print("Split complete")
 
 
-def flash_windows(device, iso):
+def flash_windows(device, iso, progress_cb=None):
+    def _emit(pct):
+        if progress_cb:
+            progress_cb(pct)
+
     print("Preparing Windows USB")
     run(["sudo", "wipefs", "-a", device])
+    _emit(8)
 
     sfdisk_script = f"""label: gpt
 device: {device}
@@ -52,58 +57,63 @@ device: {device}
     subprocess.run(["sudo", "sfdisk", device], input=sfdisk_script.encode(), check=True)
     run(["sudo", "partprobe", device])
     run(["sudo", "udevadm", "settle"])
+    _emit(15)
 
     efi  = f"{device}1"
     data = f"{device}2"
 
     run(["sudo", "mkfs.vfat", "-F32", "-n", "BOOT", efi])
     run(["sudo", "mkfs.ntfs", "-f", "-L", "WINDOWS", data])
+    _emit(22)
 
-    run(["sudo", "mkdir", "-p", "/tmp/rufus_efi"])
-    run(["sudo", "mkdir", "-p", "/tmp/rufus_data"])
-    run(["sudo", "mount", efi, "/tmp/rufus_efi"])
-    run(["sudo", "mount", data, "/tmp/rufus_data"])
+    run(["sudo", "mkdir", "-p", "/tmp/lufus_efi"])
+    run(["sudo", "mkdir", "-p", "/tmp/lufus_data"])
+    run(["sudo", "mount", efi, "/tmp/lufus_efi"])
+    run(["sudo", "mount", data, "/tmp/lufus_data"])
 
     try:
         print("Extracting ISO to data partition...")
-        run(["sudo", "7z", "x", iso, "-o/tmp/rufus_data", "-y"])
+        run(["sudo", "7z", "x", iso, "-o/tmp/lufus_data", "-y"])
+        _emit(75)
 
-        wim_size = _get_wim_size("/tmp/rufus_data")
+        wim_size = _get_wim_size("/tmp/lufus_data")
         print(f"install.wim size: {wim_size / (1024**3):.2f} GB")
 
         print("Setting up EFI partition...")
 
         for efi_dir in ["efi", "EFI"]:
-            src = f"/tmp/rufus_data/{efi_dir}"
+            src = f"/tmp/lufus_data/{efi_dir}"
             if os.path.exists(src):
-                run(["sudo", "cp", "-r", src, "/tmp/rufus_efi/"])
+                run(["sudo", "cp", "-r", src, "/tmp/lufus_efi/"])
                 print(f"Copied {efi_dir}/ to EFI partition")
                 break
         else:
             print("WARNING: No EFI directory found — may not be UEFI bootable")
 
         for boot_dir in ["boot", "BOOT"]:
-            src = f"/tmp/rufus_data/{boot_dir}"
+            src = f"/tmp/lufus_data/{boot_dir}"
             if os.path.exists(src):
-                run(["sudo", "cp", "-r", src, "/tmp/rufus_efi/"])
+                run(["sudo", "cp", "-r", src, "/tmp/lufus_efi/"])
                 print(f"Copied {boot_dir}/ to EFI partition")
                 break
 
         for f in ["bootmgr", "bootmgr.efi"]:
-            src = _find_path_case_insensitive("/tmp/rufus_data", f)
+            src = _find_path_case_insensitive("/tmp/lufus_data", f)
             if src:
-                run(["sudo", "cp", src, f"/tmp/rufus_efi/{f}"])
+                run(["sudo", "cp", src, f"/tmp/lufus_efi/{f}"])
                 print(f"Copied {f} to EFI partition root")
 
-        _fix_efi_bootloader("/tmp/rufus_efi")
+        _fix_efi_bootloader("/tmp/lufus_efi")
+        _emit(88)
 
         if wim_size > 4 * 1024**3:
-            _split_wim("/tmp/rufus_data")
+            _split_wim("/tmp/lufus_data")
 
         run(["sudo", "sync"])
+        _emit(97)
     finally:
-        run(["sudo", "umount", "/tmp/rufus_efi"])
-        run(["sudo", "umount", "/tmp/rufus_data"])
+        run(["sudo", "umount", "/tmp/lufus_efi"])
+        run(["sudo", "umount", "/tmp/lufus_data"])
 
     print("Windows USB ready")
     return True

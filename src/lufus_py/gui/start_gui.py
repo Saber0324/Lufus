@@ -4,7 +4,7 @@ import sys
 import os
 import urllib.parse
 from pathlib import Path
-from rufus_py.drives.find_usb import find_usb
+from lufus_py.drives.find_usb import find_usb
 import site
 
 def ensure_root():
