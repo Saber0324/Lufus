@@ -1,5 +1,9 @@
 import sys
 import json
+import os
+import platform
+import getpass
+from datetime import datetime
 from glob import glob
 import urllib.parse
 import webbrowser
@@ -20,18 +24,72 @@ from lufus.drives.find_usb import find_usb
 from lufus.drives.autodetect_usb import UsbMonitor
 
 
+class StdoutRedirector:
+    """Intercepts sys.stdout so every print() in every backend module
+    flows into the GUI log automatically."""
+    def __init__(self, log_fn):
+        self._log_fn = log_fn
+        self._real_stdout = sys.__stdout__
+        self._buf = ""
+
+    def write(self, text):
+        self._real_stdout.write(text)
+        self._buf += text
+        while "\n" in self._buf:
+            line, self._buf = self._buf.split("\n", 1)
+            line = line.rstrip()
+            if line:
+                self._log_fn(line)
+
+    def flush(self):
+        self._real_stdout.flush()
+
+    def fileno(self):
+        return self._real_stdout.fileno()
+
+
 class LogWindow(QDialog):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("lufus Log")
         self.resize(650, 450)
         layout = QVBoxLayout()
+
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
         self.log_text.setFont(QFont("Consolas", 9))
         self.log_text.setStyleSheet("background-color: white; border: 1px solid #ccc;")
         layout.addWidget(self.log_text)
+
+        btn_row = QHBoxLayout()
+        btn_copy = QPushButton("Copy to Clipboard")
+        btn_copy.setFixedWidth(140)
+        btn_copy.clicked.connect(self._copy_log)
+        btn_save = QPushButton("Save Log...")
+        btn_save.setFixedWidth(100)
+        btn_save.clicked.connect(self._save_log)
+        btn_row.addWidget(btn_copy)
+        btn_row.addWidget(btn_save)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
         self.setLayout(layout)
+
+    def closeEvent(self, event):
+        event.ignore()
+        self.hide()
+
+    def _copy_log(self):
+        QApplication.clipboard().setText(self.log_text.toPlainText())
+
+    def _save_log(self):
+        path, _ = QFileDialog.getSaveFileName(self, "Save Log", "lufus_log.txt", "Text Files (*.txt);;All Files (*)")
+        if path:
+            try:
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(self.log_text.toPlainText())
+            except OSError as e:
+                QMessageBox.critical(self, "Save Failed", f"Could not save log:\n{e}")
 
 class Notification(QFrame):
     def __init__(self, message, notification_type="info", duration=3000, parent=None):
@@ -140,23 +198,27 @@ class FlashWorker(QThread):
     
     def run(self):
         try:
-            self.progress.emit("Unmounting drive...")
+            self.progress.emit(f"Unmounting all partitions on {self.device_node}...")
             self.progress_value.emit(2)
-            for partition in glob(f"{self.device_node}*"):
+            partitions = glob(f"{self.device_node}*")
+            self.progress.emit(f"Found {len(partitions)} partition(s) to unmount: {', '.join(partitions) or 'none'}")
+            for partition in partitions:
+                self.progress.emit(f"Unmounting {partition}...")
                 fo.unmount(partition)
+                self.progress.emit(f"Unmounted {partition}")
             
-            self.progress.emit("Flashing ISO to device...")
+            self.progress.emit(f"Starting ISO flash: {self.iso_path} -> {self.device_node}")
             self.progress_value.emit(5)
             result = FlashUSB(self.iso_path, self.device_node, progress_cb=self.progress_value.emit, status_cb=self.progress.emit)
             
             if result:
-                self.progress.emit("Flashing complete!")
+                self.progress.emit(f"Flash completed successfully: {self.iso_path} -> {self.device_node}")
             else:
-                self.progress.emit("Flash failed.")
+                self.progress.emit(f"Flash failed for {self.iso_path} -> {self.device_node}")
             
             self.finished.emit(result)
         except Exception as e:
-            self.progress.emit(f"Error: {str(e)}")
+            self.progress.emit(f"Unhandled exception in flash worker: {type(e).__name__}: {str(e)}")
             self.finished.emit(False)
 
 
@@ -172,12 +234,16 @@ class WoeUSBWorker(QThread):
 
     def run(self):
         try:
-            self.progress.emit("Unmounting drive...")
+            self.progress.emit(f"Unmounting all partitions on {self.device_node}...")
             self.progress_value.emit(2)
-            for partition in glob(f"{self.device_node}*"):
+            partitions = glob(f"{self.device_node}*")
+            self.progress.emit(f"Found {len(partitions)} partition(s): {', '.join(partitions) or 'none'}")
+            for partition in partitions:
+                self.progress.emit(f"Unmounting {partition}...")
                 fo.unmount(partition)
+                self.progress.emit(f"Unmounted {partition}")
 
-            self.progress.emit("Flashing with woeusb...")
+            self.progress.emit(f"Starting woeusb flash: {self.iso_path} -> {self.device_node}")
             self.progress_value.emit(5)
             result = flash_woeusb(
                 self.device_node,
@@ -187,13 +253,13 @@ class WoeUSBWorker(QThread):
             )
 
             if result:
-                self.progress.emit("Flashing complete!")
+                self.progress.emit(f"woeusb flash completed successfully: {self.iso_path} -> {self.device_node}")
             else:
-                self.progress.emit("Flash failed.")
+                self.progress.emit(f"woeusb flash failed for {self.iso_path} -> {self.device_node}")
 
             self.finished.emit(result)
         except Exception as e:
-            self.progress.emit(f"Error: {str(e)}")
+            self.progress.emit(f"Unhandled exception in woeusb worker: {type(e).__name__}: {str(e)}")
             self.finished.emit(False)
 
 
@@ -210,11 +276,18 @@ class lufus(QMainWindow):
         self.flash_worker = None
         self.log_window = None
         self.about_window = None
-        
+        self.log_entries = []
+
+        sys.stdout = StdoutRedirector(self.log_message)
+
         self._apply_styles()
         self.init_ui()
-
         self.notifier = NotificationManager(self)
+
+        self.log_message("lufus started")
+        self.log_message(f"Python {sys.version.split()[0]} | {platform.system()} {platform.release()} {platform.machine()}")
+        self.log_message(f"Running as user: {getpass.getuser()} (uid={os.getuid()})")
+        self.log_message(f"Startup USB devices passed in: {list((usb_devices or {}).keys()) or 'none'}")
 
     def _apply_styles(self):
         """Apply stylesheet to the main window"""
@@ -381,6 +454,7 @@ class lufus(QMainWindow):
             self.combo_device.addItem(display, node) 
 
     def on_usb_added(self, node):
+        self.log_message(f"USB device connected: {node}")
         self.notifier.show(f"✓ {node} connected", notification_type='success', duration=3000)
 
     def create_refresh_button(self):
@@ -674,35 +748,39 @@ class lufus(QMainWindow):
 
     def refresh_usb_devices(self):
         self.statusBar.showMessage("Scanning for USB devices...", 2000)
+        self.log_message("USB device scan initiated")
         try:
             new_devices = self.monitor.devices
+            self.log_message(f"USB scan result: {len(new_devices)} device(s) found: {list(new_devices.keys())}")
             
             if new_devices:
                 self.usb_devices = new_devices
                 self._populate_device_combo()
-                self.log_message(f"USB scan complete: {len(new_devices)} device(s) found")
+                self.log_message(f"Device list updated: {[f'{k} ({v})' for k, v in new_devices.items()]}")
                 QMessageBox.information(self, "New USB Device Found","USB Device Found")            
             else:
                 self.usb_devices = {}
                 self._populate_device_combo()
-                self.log_message("No USB devices found during scan")
+                self.log_message("No USB devices detected after scan", level="WARN")
                 QMessageBox.information(self, "No Devices", 
                     "No USB drives were found.\n\nPlease connect a drive and try again.")
         except Exception as e:
             self.statusBar.showMessage("Scan failed", 3000)
-            self.log_message(f"USB scan error: {str(e)}")
+            self.log_message(f"USB scan raised exception: {type(e).__name__}: {str(e)}", level="ERROR")
             QMessageBox.critical(self, "Scan Error", f"Failed to scan for USB devices:\n{str(e)}")
 
     def updateFS(self):
         states.currentFS = self.combo_fs.currentIndex()
+        self.log_message(f"File system changed to: {self.combo_fs.currentText()} (index={states.currentFS})")
 
     def updateflash(self):
         self.combo_device.clear()
         states.currentflash = self.combo_flash.currentIndex()
-        print(states.currentflash)
-    
+        self.log_message(f"Flash option changed to: {self.combo_flash.currentText()} (index={states.currentflash})")
+
     def update_image_option(self):
         states.image_option = self.combo_image_option.currentIndex()
+        self.log_message(f"Image option changed to: {self.combo_image_option.currentText()} (index={states.image_option})")
         self._update_filesystem_options()
         self._update_flashing_options()
     
@@ -740,44 +818,63 @@ class lufus(QMainWindow):
 
     def update_partition_scheme(self):
         states.partition_scheme = self.combo_partition.currentIndex()
+        self.log_message(f"Partition scheme changed to: {self.combo_partition.currentText()} (index={states.partition_scheme})")
 
     def update_target_system(self):
         states.target_system = self.combo_target.currentIndex()
-        # print(f"Global state updated to: {states.target_system}")
-    
+        self.log_message(f"Target system changed to: {self.combo_target.currentText()} (index={states.target_system})")
+
     def update_new_label(self, current_text):
         states.new_label = current_text
-    
+        self.log_message(f"Volume label set to: {current_text!r}")
+
     def update_cluster_size(self):
         states.cluster_size = self.combo_cluster.currentIndex()
-        # print(f"Global state updated to: {states.cluster_size}")
+        self.log_message(f"Cluster size changed to: {self.combo_cluster.currentText()} (index={states.cluster_size})")
 
     def update_QF(self):
         states.QF = 0 if self.chk_quick.isChecked() else 1
+        self.log_message(f"Quick format: {'enabled' if self.chk_quick.isChecked() else 'disabled'}")
 
     def update_create_extended(self):
         states.create_extended = 0 if self.chk_extended.isChecked() else 1
+        self.log_message(f"Create extended label/icon files: {'enabled' if self.chk_extended.isChecked() else 'disabled'}")
 
     def update_check_bad(self):
         states.check_bad = 0 if self.chk_badblocks.isChecked() else 1
         self.combo_badblocks.setEnabled(self.chk_badblocks.isChecked())
+        self.log_message(f"Bad block check: {'enabled' if self.chk_badblocks.isChecked() else 'disabled'}")
 
     def browse_file(self):
         file_name, _ = QFileDialog.getOpenFileName(self, "Select Disk Image", "", 
                                                     "ISO Images (*.iso);;All Files (*)")
         if file_name:
+            file_size = os.path.getsize(file_name)
             states.iso_path = file_name
             clean_name = file_name.split("/")[-1].split("\\")[-1]
             self.combo_boot.setItemText(0, clean_name)
             self.input_label.setText(clean_name.split('.')[0].upper())
-            self.log_message(f"Selected image: {file_name}")
+            self.log_message(f"Image selected: {file_name}")
+            self.log_message(f"Image size: {file_size:,} bytes ({file_size / (1024**3):.2f} GiB)")
 
     def show_log(self):
         if self.log_window is None:
             self.log_window = LogWindow()
+        self.log_window.log_text.setPlainText("\n".join(self.log_entries))
         self.log_window.show()
         self.log_window.raise_()
         self.log_window.activateWindow()
+        scrollbar = self.log_window.log_text.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+
+    def log_message(self, msg, level="INFO"):
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        entry = f"[{timestamp}] [{level}] {msg}"
+        self.log_entries.append(entry)
+        if self.log_window is not None:
+            self.log_window.log_text.append(entry)
+            scrollbar = self.log_window.log_text.verticalScrollBar()
+            scrollbar.setValue(scrollbar.maximum())
 
     def show_about(self):
         if self.about_window is None:
@@ -791,10 +888,6 @@ class lufus(QMainWindow):
         self.about_window.raise_()
         self.about_window.activateWindow()
 
-    def log_message(self, msg):
-        if self.log_window and self.log_window.isVisible():
-            self.log_window.log_text.append(f"[INFO] {msg}")
-
     def get_selected_mount_path(self) -> str:
         text = self.combo_device.currentText()
         if '(' in text and ')' in text:
@@ -807,24 +900,27 @@ class lufus(QMainWindow):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if reply == QMessageBox.StandardButton.Yes:
             if self.flash_worker and self.flash_worker.isRunning():
+                self.log_message("Sending terminate signal to flash worker thread", level="WARN")
                 self.flash_worker.terminate()
+                self.flash_worker.wait(2000)
+                self.log_message("Flash worker thread terminated")
             self.progress_bar.setValue(0)
             self.progress_bar.setFormat("")
             self.btn_start.setEnabled(True)
             self.btn_cancel.setEnabled(False)
             self.statusBar.showMessage("Ready", 0)
-            self.log_message("Flash process cancelled by user")
+            self.log_message("Flash process cancelled by user", level="WARN")
     
     def on_flash_finished(self, success: bool):
         if success:
             self.progress_bar.setValue(100)
             self.progress_bar.setFormat("Complete! 100%")
+            self.log_message("Flash operation finished with result: SUCCESS")
             QMessageBox.information(self, "Success", "USB drive flashed successfully!")
-            self.log_message("Flash completed successfully")
         else:
             self.progress_bar.setFormat("Failed")
+            self.log_message("Flash operation finished with result: FAILED", level="ERROR")
             QMessageBox.critical(self, "Error", "Failed to flash USB drive.")
-            self.log_message("Flash failed")
         
         self.btn_start.setEnabled(True)
         self.btn_cancel.setEnabled(False)
@@ -832,13 +928,16 @@ class lufus(QMainWindow):
     
     def start_process(self):
         states.DN = self.combo_device.currentData() or ""
+        self.log_message(f"Start process triggered: image_option={states.image_option}, flash_mode={states.currentflash}, device={states.DN}")
         if states.image_option == 0: # WINDOWS
             if states.currentflash == 0: # iso mode
                 if not getattr(states, 'iso_path', '') or not Path(states.iso_path).exists():
+                    self.log_message("Start aborted: no valid ISO path set", level="WARN")
                     QMessageBox.warning(self, "No Image", "Please select a valid installation file first.")
                     return
                 mount_path = self.get_selected_mount_path()
                 if not mount_path:
+                    self.log_message("Start aborted: no USB device selected", level="WARN")
                     QMessageBox.warning(self, "No Device", "Please select a USB device first.")
                     return
 
@@ -848,21 +947,23 @@ class lufus(QMainWindow):
                 self.progress_bar.setFormat("Preparing...")
                 self.statusBar.showMessage("Flashing...", 0)
 
+                self.log_message(f"Launching FlashWorker: iso={states.iso_path}, target={mount_path}, mode=Windows ISO")
                 self.flash_worker = FlashWorker(states.iso_path, mount_path)
                 self.flash_worker.progress.connect(lambda msg: self.statusBar.showMessage(msg, 0))
+                self.flash_worker.progress.connect(self.log_message)
                 self.flash_worker.progress_value.connect(self.progress_bar.setValue)
                 self.flash_worker.progress_value.connect(lambda v: self.progress_bar.setFormat(f"{v}%"))
                 self.flash_worker.finished.connect(self.on_flash_finished)
                 self.flash_worker.start()
-
-                self.log_message(f"Starting Windows flash process: {states.iso_path} -> {mount_path}")
 
             elif states.currentflash == 1: # Woe USB
                 if not getattr(states, 'iso_path', '') or not Path(states.iso_path).exists():
+                    self.log_message("Start aborted: no valid ISO path set", level="WARN")
                     QMessageBox.warning(self, "No Image", "Please select a valid installation file first.")
                     return
                 mount_path = self.get_selected_mount_path()
                 if not mount_path:
+                    self.log_message("Start aborted: no USB device selected", level="WARN")
                     QMessageBox.warning(self, "No Device", "Please select a USB device first.")
                     return
 
@@ -872,23 +973,24 @@ class lufus(QMainWindow):
                 self.progress_bar.setFormat("Preparing...")
                 self.statusBar.showMessage("Flashing...", 0)
 
+                self.log_message(f"Launching WoeUSBWorker: iso={states.iso_path}, target={mount_path}")
                 self.flash_worker = WoeUSBWorker(states.iso_path, mount_path)
                 self.flash_worker.progress.connect(lambda msg: self.statusBar.showMessage(msg, 0))
+                self.flash_worker.progress.connect(self.log_message)
                 self.flash_worker.progress_value.connect(self.progress_bar.setValue)
                 self.flash_worker.progress_value.connect(lambda v: self.progress_bar.setFormat(f"{v}%"))
                 self.flash_worker.finished.connect(self.on_flash_finished)
                 self.flash_worker.start()
 
-                self.log_message(f"Starting woeusb flash process: {states.iso_path} -> {mount_path}")
-
         elif states.image_option == 1: # LINUX
             if states.currentflash == 0: # DD METHOD
-                ### FLASHING
                 if not getattr(states, 'iso_path', '') or not Path(states.iso_path).exists():
+                    self.log_message("Start aborted: no valid ISO path set", level="WARN")
                     QMessageBox.warning(self, "No Image", "Please select a valid installation file first.")
                     return
                 device_node = self.get_selected_mount_path()
                 if not device_node:
+                    self.log_message("Start aborted: no USB device selected", level="WARN")
                     QMessageBox.warning(self, "No Device", "Please select a USB device first.")
                     return
                 
@@ -898,14 +1000,14 @@ class lufus(QMainWindow):
                 self.progress_bar.setFormat("Preparing...")
                 self.statusBar.showMessage("Flashing...", 0)
                 
+                self.log_message(f"Launching FlashWorker: iso={states.iso_path}, target={device_node}, mode=Linux dd")
                 self.flash_worker = FlashWorker(states.iso_path, device_node)
                 self.flash_worker.progress.connect(lambda msg: self.statusBar.showMessage(msg, 0))
+                self.flash_worker.progress.connect(self.log_message)
                 self.flash_worker.progress_value.connect(self.progress_bar.setValue)
                 self.flash_worker.progress_value.connect(lambda v: self.progress_bar.setFormat(f"{v}%"))
                 self.flash_worker.finished.connect(self.on_flash_finished)
                 self.flash_worker.start()
-                
-                self.log_message(f"Starting flash process: {states.iso_path} -> {device_node}")
             else: # OTHER METHODS NOT YET DONE
                 pass 
         elif states.image_option == 2: # ONLY FORMATTING
