@@ -610,30 +610,6 @@ class lufus(QMainWindow):
         self.log_message(f"USB device connected: {node}")
         self.notifier.show(f"✓ {node} connected", notification_type="success", duration=3000)
 
-
-    def create_refresh_button(self):
-        S = self._S
-        size = S.px(25)
-        btn = QToolButton()
-        btn.setText("🔄")
-        btn.setToolTip(self._T.get("tooltip_refresh", "Refresh"))
-        btn.setStyleSheet(f"""
-            QToolButton {{
-                border: 1px solid palette(mid);
-                background-color: palette(button);
-                font-size: {S.pt(13)}pt;
-                max-height: {size}px;
-                min-height: {size}px;
-                max-width:  {size}px;
-                min-width:  {size}px;
-            }}
-            QToolButton:hover  {{ background-color: palette(highlight); border-color: palette(highlight); color: palette(highlighted-text); }}
-            QToolButton:pressed {{ background-color: palette(dark); }}
-        """)
-        btn.clicked.connect(self.refresh_usb_devices)
-        return btn
-
-
     def init_ui(self):
         S = self._S
         FIELD_SPACING = S.px(2)
@@ -902,6 +878,15 @@ class lufus(QMainWindow):
         self.setStatusBar(self.statusBar)
         self.statusBar.showMessage(self._T.get("status_ready", "Ready"), 0)
 
+    def create_refresh_button(self):
+        S = self._S
+        size = S.px(25)
+        btn = QToolButton()
+        btn.setText("🔄")
+        btn.setToolTip(self._T.get("tooltip_refresh", "Refresh"))
+        btn.setFixedSize(size, size)
+        btn.clicked.connect(self.refresh_usb_devices)
+        return btn
 
     def _populate_device_combo(self):
         self.combo_device.blockSignals(True)
@@ -1479,7 +1464,7 @@ if __name__ == "__main__":
     )
 
     app = QApplication(sys.argv)
-    app.setStyle("Fusion")
+    app.setStyle()
 
     usb_devices = {}
     # Only try to parse usb_devices JSON when the arg is not a known flag
