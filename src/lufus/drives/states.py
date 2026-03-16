@@ -13,3 +13,7 @@ currentflash: int = 0
 language: str = "English"
 verify_hash: bool = False
 expected_hash: str = ""
+winhardware = 0
+winmicrosoftacc = 0
+winlocalacc = 'default'
+winprivacy = 0
