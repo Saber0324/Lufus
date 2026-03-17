@@ -880,9 +880,8 @@ class lufus(QMainWindow):
         btn_icon1 = QToolButton()
         btn_icon1.setText("🌐")
         btn_icon1.setToolTip(self._T.get("tooltip_download", "Download"))
-        btn_icon1.clicked.connect(
-            lambda: webbrowser.open("http://www.github.com/hog185/lufus")
-        )
+        btn_icon1.clicked.connect(self._open_url)
+        
 
         btn_icon2 = QToolButton()
         btn_icon2.setText("ℹ")
@@ -1050,6 +1049,28 @@ class lufus(QMainWindow):
     #def update_target_system(self):
     #    states.target_system = self.combo_target.currentIndex()
     #    self.log_message(f"Target system changed to: {self.combo_target.currentText()} (index={states.target_system})")
+
+    def _open_url(self):
+        url = "http://www.github.com/hog185/lufus"
+        pkexec_uid = os.environ.get("PKEXEC_UID")
+        if pkexec_uid and os.geteuid() == 0:
+            try:
+                import pwd
+                user_info = pwd.getpwuid(int(pkexec_uid))
+                subprocess.Popen(
+                    ["runuser", "-u", user_info.pw_name, "--", "xdg-open", url],
+                    env={
+                        "DISPLAY": os.environ.get("DISPLAY", ":0"),
+                        "WAYLAND_DISPLAY": os.environ.get("WAYLAND_DISPLAY", ""),
+                        "XDG_RUNTIME_DIR": f"/run/user/{pkexec_uid}",
+                        "HOME": user_info.pw_dir,
+                        "PATH": "/usr/bin:/bin",
+                    }
+                )
+                return
+            except Exception as e:
+                self.log_message(f"Failed to open URL as user: {e}", level="WARN")
+        webbrowser.open(url)
 
     def update_new_label(self, current_text):
         states.new_label = current_text
