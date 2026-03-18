@@ -56,7 +56,7 @@ progress_preparing,Підготовка...
 progress_complete,Готово! 100%
 progress_failed,Помилка
 progress_starting,Початок.. 10%
-Диск демонтовано.. 20%
+progress_unmounted,Диск демонтовано.. 20%
 progress_formatted,Форматування диска.. 60%
 progress_label_changed,Мітку змінено.. 80%
 progress_mount_done,Монтування виконано.. Завершено! 100%
