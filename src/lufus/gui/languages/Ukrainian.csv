@@ -24,6 +24,7 @@ lbl_flash_option,Параметр флеш-пам'яті
 lbl_cluster_size,Розмір кластера
 combo_image_windows,Стандартна установка Windows
 combo_image_linux,Стандартний Linux
+combo_image_other,Будь-яка установка (режим DD)
 combo_image_format,Тільки режим форматування
 combo_partition_gpt,GPT
 combo_partition_mbr,MBR
@@ -40,6 +41,8 @@ combo_flash_none,Нічого
 chk_quick_format,Швидке форматування
 chk_extended_label,Створити розширену мітку та файли піктограм
 chk_bad_blocks,Перевірити пристрій на наявність пошкоджених блоків
+chk_verify_hash,Перевірити контрольну суму SHA256
+lbl_expected_hash,Очікуваний SHA256:
 btn_select,ВИБРАТИ
 btn_start,ПОЧАТИ
 btn_cancel,СКАСУВАТИ
@@ -52,6 +55,7 @@ status_ready,Готовий
 status_scanning,Сканування USB-пристроїв...
 status_scan_failed,Помилка ск
 status_flashing,Прошивка...
+progress_verifying,Перевірка контрольної суми...
 progress_preparing,Підготовка...
 progress_complete,Готово! 100%
 progress_failed,Помилка
@@ -66,6 +70,10 @@ msgbox_success_title,Успішно
 msgbox_success_body,USB-диск успішно прошито!
 msgbox_error_title,Помилка
 msgbox_error_body,Не вдалося прошити USB-диск.
+msgbox_verify_fail_title,Перевірка не вдалася
+msgbox_verify_fail_body,Контрольна сума SHA256 не збігається! Файл може бути пошкоджений.
+msgbox_invalid_hash_title,Невірний хеш
+msgbox_invalid_hash_body,Наданий хеш SHA256 є недійсним.
 msgbox_no_image_title,Немає образу
 msgbox_no_image_body,Будь ласка спочатку виберіть дійсний файл установки.
 msgbox_no_device_title,Немає пристрою
@@ -80,6 +88,9 @@ no_usb_found,USB-пристроїв не знайдено
 dlg_select_image_title,Вибрати образ диска
 dlg_select_image_filter,ISO-образи (*.iso);;Усі файли (*)
 about_content,lufus — це інструмент запису образів дисків написаний на Python для Linux.
+
 Натхненний оригінальним інструментом lufus для Windows.
+
 Версія: 1.0.0
+
 GitHub: github.com/hog185/lufus
