@@ -43,13 +43,21 @@ from PyQt6.QtCore import (
     pyqtSignal,
     QPropertyAnimation,
 )
-from PyQt6.QtGui import QFont, QFontDatabase
+from PyQt6.QtGui import QFont, QFontDatabase, QIcon
 from lufus.drives import states
 from lufus.drives.autodetect_usb import UsbMonitor
 from lufus.lufus_logging import get_logger
 
 # themes live here :3
 THEME_DIR = Path(__file__).parent / 'themes'
+ASSETS_DIR = Path(__file__).parent / 'assets'
+
+
+def _load_icon(name: str) -> QIcon:
+    path = ASSETS_DIR / f"{name}.png"
+    if path.exists():
+        return QIcon(str(path))
+    return QIcon()
 
 
 def _find_resource_dir(name: str) -> Path | None:
@@ -168,10 +176,10 @@ class LogWindow(QDialog):
         # add copy and save buttons
         btn_row = QHBoxLayout()
         btn_copy = QPushButton(self._T.get("btn_copy_log", "Copy Log"))
-        btn_copy.setFixedWidth(self._S.px(140) if self._S else 140)
+        btn_copy.setMinimumWidth(self._S.px(220) if self._S else 220)
         btn_copy.clicked.connect(self._copy_log)
         btn_save = QPushButton(self._T.get("btn_save_log", "Save Log"))
-        btn_save.setFixedWidth(self._S.px(100) if self._S else 100)
+        btn_save.setFixedWidth(self._S.px(150) if self._S else 150)
         btn_save.clicked.connect(self._save_log)
         btn_row.addWidget(btn_copy)
         btn_row.addWidget(btn_save)
@@ -210,110 +218,6 @@ class LogWindow(QDialog):
                 )
 
 
-class Notification(QFrame):
-    def __init__(self, message, notification_type="info", duration=3000, parent=None, scale: Scale = None):
-        super().__init__(parent)
-        # create floating notification widget :3
-        self._S = scale
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        # color scheme for different notification types
-        colors = {
-            "info": "#6e6e6e",
-            "success": "#5a5a5a",
-        }
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-
-        # calculate scaled padding and radius :D
-        pad_v  = self._S.px(15) if self._S else 15
-        pad_h  = self._S.px(25) if self._S else 25
-        radius = self._S.px(8)  if self._S else 8
-        fsize  = self._S.pt(11) if self._S else 11
-
-        # create label with styled background
-        self.label = QLabel(message)
-        self.label.setWordWrap(True)
-        self.label.setStyleSheet(f"""
-            QLabel {{
-                background-color: {colors.get(notification_type.lower(), '#333333')};
-                color: white;
-                padding: {pad_v}px {pad_h}px;
-                border-radius: {radius}px;
-                font-size: {fsize}pt;
-                font-weight: bold;
-            }}
-        """)
-        layout.addWidget(self.label)
-
-        # fade in animation :3
-        self.fade_in = QPropertyAnimation(self, b"windowOpacity")
-        self.fade_in.setDuration(200)
-        self.fade_in.setStartValue(0.0)
-        self.fade_in.setEndValue(1.0)
-
-        # position and show notification
-        self.adjustSize()
-        self.position_notification()
-        self.show()
-        self.fade_in.start()
-
-        # auto hide after duration
-        self.timer = QTimer()
-        self.timer.timeout.connect(self.fade_out)
-        self.timer.setSingleShot(True)
-        self.timer.start(duration)
-
-    def fade_out(self):
-        # fade out animation then close :D
-        self.fade_out_anim = QPropertyAnimation(self, b"windowOpacity")
-        self.fade_out_anim.setDuration(200)
-        self.fade_out_anim.setStartValue(1.0)
-        self.fade_out_anim.setEndValue(0.0)
-        self.fade_out_anim.finished.connect(self.close)
-        self.fade_out_anim.start()
-
-    def position_notification(self, index=0):
-        # position notification at bottom right of screen or parent
-        screen = QApplication.primaryScreen().availableGeometry()
-
-        if self.parent() and isinstance(self.parent(), QWidget):
-            # position relative to parent window if available :3
-            parent_geo = self.parent().frameGeometry()
-            if screen.contains(parent_geo.topLeft()):
-                x = parent_geo.right() - self.width() - 20
-                y = parent_geo.bottom() - (self.height() + 10) * (index + 1) - 20
-                self.move(int(x), int(y))
-                return
-
-        # fallback to screen positioning
-        x = screen.right() - self.width() - 20
-        y = screen.bottom() - (self.height() + 10) * (index + 1) - 20
-        self.move(int(x), int(y))
-
-
-class NotificationManager:
-    def __init__(self, parent=None, scale: Scale = None):
-        # manage multiple notification widgets :D
-        self.parent = parent
-        self._S = scale
-        self.notifications = []
-
-    def show(self, message, notification_type="info", duration=3000):
-        # create and show new notification
-        notification = Notification(
-            message, notification_type, duration, self.parent, scale=self._S
-        )
-        self.notifications.append(notification)
-        # position based on existing notifications
-        notification.position_notification(len(self.notifications) - 1)
-        notification.show()
-        # remove from list when destroyed
-        notification.destroyed.connect(
-            lambda: self.notifications.remove(notification)
-            if notification in self.notifications else None
-        )
 
 
 class AboutWindow(QDialog):
@@ -370,13 +274,12 @@ class AboutWindow(QDialog):
         self.about_text.setStyleSheet(f"font-family: {font_family}; font-size: {tool_pt}pt; color: {fg_color};")
         layout.addWidget(self.about_text, 1)
 
-        # close button at bottom :3
         btn_row = QHBoxLayout()
-        btn_row.addStretch()
+        #close button or smth, whatever
         btn_close = QPushButton(self._T.get("btn_close", "Close"))
         btn_close.setFixedWidth(self._S.px(90) if self._S else 90)
         btn_close.clicked.connect(self.hide)
-        btn_row.addWidget(btn_close)
+        btn_row.addWidget(btn_close, alignment=Qt.AlignmentFlag.AlignCenter)
         layout.addLayout(btn_row)
 
         self.setLayout(layout)
@@ -636,7 +539,6 @@ class lufus(QMainWindow):
         QTimer.singleShot(0, self._apply_styles)
         self.update_usb_list(self.monitor.devices)
         self.setAcceptDrops(True)
-        self.notifier = NotificationManager(self, scale=self._S)
 
         # start clipboard monitoring :3
         self._clipboard_timer = QTimer(self)
@@ -790,7 +692,6 @@ class lufus(QMainWindow):
     def on_usb_added(self, node):
         # handle new usb device detection :3
         self.log_message(f"USB device connected: {node}")
-        self.notifier.show(f"✓ {node} connected", notification_type="success", duration=3000)
 
     def init_ui(self):
         # build main user interface :D
@@ -1018,24 +919,28 @@ class lufus(QMainWindow):
         main_layout.addWidget(self.progress_bar)
         main_layout.addSpacing(S.px(10))
 
-        # toolbar buttons for download about settings log :3
+        # toolbar buttons
         btn_icon1 = QToolButton()
-        btn_icon1.setText("🌐")
-        btn_icon1.setToolTip(self._T.get("tooltip_download", "Download"))
+        btn_icon1.setIcon(_load_icon("website"))
+        btn_icon1.setText("" if (ASSETS_DIR / "website.png").exists() else "🌐")
+        btn_icon1.setToolTip(self._T.get("tooltip_website", "Website"))
         btn_icon1.clicked.connect(self._open_url)
 
         btn_icon2 = QToolButton()
-        btn_icon2.setText("ℹ")
+        btn_icon2.setIcon(_load_icon("about"))
+        btn_icon2.setText("" if (ASSETS_DIR / "about.png").exists() else "ℹ")
         btn_icon2.setToolTip(self._T.get("tooltip_about", "About"))
         btn_icon2.clicked.connect(self.show_about)
 
         btn_icon3 = QToolButton()
-        btn_icon3.setText("⚙")
+        btn_icon3.setIcon(_load_icon("settings"))
+        btn_icon3.setText("" if (ASSETS_DIR / "settings.png").exists() else "⚙")
         btn_icon3.setToolTip(self._T.get("tooltip_settings", "Settings"))
         btn_icon3.clicked.connect(self.show_settings)
 
         btn_icon4 = QToolButton()
-        btn_icon4.setText("📄")
+        btn_icon4.setIcon(_load_icon("log"))
+        btn_icon4.setText("" if (ASSETS_DIR / "log.png").exists() else "📄")
         btn_icon4.setToolTip(self._T.get("tooltip_log", "Log"))
         btn_icon4.clicked.connect(self.show_log)
 
@@ -1081,7 +986,8 @@ class lufus(QMainWindow):
         S = self._S
         size = S.px(25)
         btn = QToolButton()
-        btn.setText("🔄")
+        btn.setIcon(_load_icon("refresh"))
+        btn.setText("" if (ASSETS_DIR / "refresh.png").exists() else "🔄")
         btn.setToolTip(self._T.get("tooltip_refresh", "Refresh"))
         btn.setFixedSize(size, size)
         btn.clicked.connect(self.refresh_usb_devices)
@@ -1285,7 +1191,6 @@ class lufus(QMainWindow):
             self.input_label.setText(clean_name.split(".")[0].upper())
             self.log_message(f"Image loaded from clipboard: {path}")
             self.log_message(f"Image size: {file_size:,} bytes ({file_size / (1024**3):.2f} GiB)")
-            self.notifier.show(f"✓ {clean_name} loaded from clipboard", notification_type="success", duration=3000)
 
     def dragEnterEvent(self, event):
         # accept drag of supported image files :D
@@ -1321,7 +1226,6 @@ class lufus(QMainWindow):
             self.input_label.setText(clean_name.split(".")[0].upper())
             self.log_message(f"Image selected via drag-and-drop: {file_name}")
             self.log_message(f"Image size: {file_size:,} bytes ({file_size / (1024**3):.2f} GiB)")
-            self.notifier.show(f"✓ {clean_name} loaded", notification_type="success", duration=3000)
             event.acceptProposedAction()
         else:
             event.ignore()
