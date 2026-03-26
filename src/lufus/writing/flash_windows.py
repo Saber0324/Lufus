@@ -14,6 +14,7 @@ log = get_logger(__name__)
 
 
 def run(cmd):
+    """Wrapper for subprocess.run with logging and error checking."""
     log.debug("run: %s", cmd)
     subprocess.run(cmd, check=True)
 
@@ -170,7 +171,7 @@ def _find_ntfs_tool(status_cb=None) -> str | None:
     ]
     for pm_cmd in pkg_managers:
         if subprocess.run(["which", pm_cmd[0]], capture_output=True).returncode == 0:
-            subprocess.run(["sudo"] + pm_cmd, check=True)
+            run(["sudo"] + pm_cmd)
             break
 
     for candidate in ["mkfs.ntfs", "mkntfs"]:
@@ -192,7 +193,7 @@ def _ensure_wimlib(status_cb=None) -> None:
     ]
     for pm_cmd in pkg_managers:
         if subprocess.run(["which", pm_cmd[0]], capture_output=True).returncode == 0:
-            subprocess.run(["sudo"] + pm_cmd, check=True)
+            run(["sudo"] + pm_cmd)
             break
     if subprocess.run(["which", "wimlib-imagex"], capture_output=True).returncode != 0:
         raise FileNotFoundError(
@@ -467,7 +468,7 @@ def mount_iso(iso_path:str)->str|None:
     try:
         os.makedirs(iso_mount_location,exist_ok=True)
         stats(f"Mounting {iso_path} in {iso_mount_location}")
-        result=subprocess.run(["mount","-o","loop",iso_path,iso_mount_location],
+        result=subprocess.run(["sudo","mount","-o","loop",iso_path,iso_mount_location],
                               capture_output=True,
                               text=True)
         

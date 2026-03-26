@@ -467,6 +467,8 @@ class FlashWorker(QThread):
                       scheme=PartitionScheme.SIMPLE_FAT32
                     elif states.currentFS == 2:
                       scheme=PartitionScheme.WINDOWS_EXFAT
+                    else:
+                      scheme=PartitionScheme.LINUX
                     success = FlashUSB(iso_path, device_node,
                                        scheme,
                                        progress_cb=self.progress.emit,
@@ -476,7 +478,7 @@ class FlashWorker(QThread):
             else:
                 # other flash modes (Linux, Other)
                 success = FlashUSB(iso_path, device_node,
-                                   PartitionScheme.SIMPLE_FAT32,
+                                   PartitionScheme.LINUX,
                                    progress_cb=self.progress.emit,
                                    status_cb=self.status.emit)
 
